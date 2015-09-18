@@ -5723,10 +5723,22 @@ public:
         float M3 = (float) M[3];
         float M6 = (float) M[6];
 
-        printf("width=%d, height=%d, bw0=%d, bh0=%d\n",
+        const float ShortMax[4] = {32767.0f,32767.0f,32767.0f,32767.0f};
+        const float ShortMin[4] = { -32768.0f, -32768.0f, -32768.0f, -32768.0f};
+        const float x1_base[4] = {-4.0f, -3.0f, -2.0f, -1.0f};
+        float32x4_t ShortMax_vf = vld1q_f32(ShortMax);
+        float32x4_t ShortMin_vf = vld1q_f32(ShortMin);
+        float32x4_t x1_vf;
+        //        x1_vf = vaddq_f32(x1_vf, vdupq_n_f32((float)x1));
+        float32x4_t four = vdupq_n_f32(4.0f);
+        float32x4_t M0_vf = vdupq_n_f32(M0);
+        float32x4_t M3_vf = vdupq_n_f32(M3);
+        float32x4_t M6_vf = vdupq_n_f32(M6);
+
+/*        printf("width=%d, height=%d, bw0=%d, bh0=%d\n",
                 width, height, bw0, bh0);
         printf("range.start=%d, range.end=%d\n",
-                range.start, range.end);
+                range.start, range.end);*/
 
         #if CV_SSE4_1
         bool haveSSE4_1 = checkHardwareSupport(CV_CPU_SSE4_1);
@@ -5759,9 +5771,14 @@ public:
                 for( y1 = 0; y1 < bh; y1++ )
                 {
                     short* xy = XY + y1*bw*2;
+//                    short* myxy = XY + y1*bw*2;
                     float X0 = (float) (M[0]*x + M[1]*(y + y1) + M[2]);
                     float Y0 = (float) (M[3]*x + M[4]*(y + y1) + M[5]);
                     float W0 = (float) (M[6]*x + M[7]*(y + y1) + M[8]);
+
+                    float32x4_t W0_vf = vdupq_n_f32(W0);
+                    float32x4_t X0_vf = vdupq_n_f32(X0);
+                    float32x4_t Y0_vf = vdupq_n_f32(Y0);
 
                     if( interpolation == INTER_NEAREST )
                     {
@@ -5876,10 +5893,71 @@ public:
                             }
                         }
                         #endif
+                        x1_vf = vld1q_f32(x1_base);
+
+                        for (;x1 < bw; x1 += 4) {
+                            // x1 += 1
+                            x1_vf = vaddq_f32(x1_vf, four);
+
+                            // W = W0+M6*x1
+                            float32x4_t W = vmlaq_f32(W0_vf, M6_vf, x1_vf);
+                            // W = 1./W
+                            float32x4_t tW = vrecpeq_f32(W);
+                            tW = vmulq_f32(vrecpsq_f32(W, tW), tW);
+                            W = vmulq_f32(vrecpsq_f32(W, tW), tW);
+
+                            float32x4_t fX = vmaxq_f32(ShortMin_vf,
+                                               vminq_f32(ShortMax_vf,
+                                                 vmulq_f32( W,
+                                                   vmlaq_f32(X0_vf, M0_vf, x1_vf))));
+                            float32x4_t fY = vmaxq_f32(ShortMin_vf,
+                                               vminq_f32(ShortMax_vf,
+                                                 vmulq_f32( W,
+                                                   vmlaq_f32(Y0_vf, M3_vf, x1_vf))));
+                            int16x4x2_t out;
+                            out.val[0] = vqmovn_s32(vcvtq_s32_f32(fX));
+                            out.val[1] = vqmovn_s32(vcvtq_s32_f32(fY));
+                            vst2_s16(xy, out);
+                            xy += 8;
+
+/*                            // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53538
+                            printf("x1=%f, W=%f, fX=%f, fY=%f\n", 
+                                        vgetq_lane_f32(x1_vf, 0),
+                                        vgetq_lane_f32(W, 0),
+                                        vgetq_lane_f32(fX, 0),
+                                        vgetq_lane_f32(fY, 0));
+                            printf("x1=%f, W=%f, fX=%f, fY=%f\n", 
+                                        vgetq_lane_f32(x1_vf, 1),
+                                        vgetq_lane_f32(W, 1),
+                                        vgetq_lane_f32(fX, 1),
+                                        vgetq_lane_f32(fY, 1));
+                            printf("x1=%f, W=%f, fX=%f, fY=%f\n", 
+                                        vgetq_lane_f32(x1_vf, 2),
+                                        vgetq_lane_f32(W, 2),
+                                        vgetq_lane_f32(fX, 2),
+                                        vgetq_lane_f32(fY, 2));
+                            printf("x1=%f, W=%f, fX=%f, fY=%f\n", 
+                                        vgetq_lane_f32(x1_vf, 3),
+                                        vgetq_lane_f32(W, 3),
+                                        vgetq_lane_f32(fX, 3),
+                                        vgetq_lane_f32(fY, 3));
+
+                            printf("fX0=%hd, fX1=%hd, fX2=%hd, fX3=%hd\n",
+                                    vget_lane_s16(out.val[0], 0),
+                                    vget_lane_s16(out.val[0], 1),
+                                    vget_lane_s16(out.val[0], 2),
+                                    vget_lane_s16(out.val[0], 3));
+                            printf("fY0=%hd, fY1=%hd, fY2=%hd, fY3=%hd\n",
+                                    vget_lane_s16(out.val[1], 0),
+                                    vget_lane_s16(out.val[1], 1),
+                                    vget_lane_s16(out.val[1], 2),
+                                    vget_lane_s16(out.val[1], 3));*/
+                        }
 
                         #define SHORT_MAX 32767
                         #define SHORT_MIN -32768
 
+//                        x1 = 0; // XXX redo everything
                         for( ; x1 < bw; x1++ )
                         {
                             float W = W0 + M6*x1;
@@ -5890,12 +5968,25 @@ public:
                             
                             float fX = std::max((float)SHORT_MIN, std::min((float)SHORT_MAX, (X0 + M0*x1)*W));
                             float fY = std::max((float)SHORT_MIN, std::min((float)SHORT_MAX, (Y0 + M3*x1)*W));
+//                            printf("old: x1=%d, W=%f, fX=%f, fY=%f\n", x1, W, fX, fY);
 
                             //int X = saturate_cast<int>(fX);
                             //int Y = saturate_cast<int>(fY);
 
                             //xy[x1*2] = saturate_cast<short>(X);
                             //xy[x1*2+1] = saturate_cast<short>(Y);
+/*                            short tmpx = saturate_cast<short>(fX);
+                            short tmpy = saturate_cast<short>(fY);
+
+                            if (xy[x1*2] != tmpx) {
+                                printf("Found %hd at %d, expected %hd\n",
+                                        xy[x1*2], x1*2, tmpx);
+                            }
+                            if (xy[x1*2+1] != tmpy) {
+                                printf("Found %hd at %d, expected %hd\n",
+                                        xy[x1*2+1], x1*2+1, tmpy);
+                            }*/
+
                             xy[x1*2] = saturate_cast<short>(fX);
                             xy[x1*2+1] = saturate_cast<short>(fY);
                         }
@@ -6070,6 +6161,7 @@ private:
     double* M;
     int interpolation, borderType;
     Scalar borderValue;
+
 };
 
 
