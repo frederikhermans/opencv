@@ -126,7 +126,7 @@
 #elif defined HAVE_CONCURRENCY
 #  define CV_PARALLEL_FRAMEWORK "ms-concurrency"
 #elif defined HAVE_PTHREADS
-#  define CV_PARALLEL_FRAMEWORK "pthreads"
+//#  define CV_PARALLEL_FRAMEWORK "pthreads"
 #endif
 
 namespace cv
