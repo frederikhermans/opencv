@@ -73,7 +73,7 @@ function(find_python preferred_version min_version library_env include_dir_env
   if(_found)
     set(_version_major_minor "${_version_major}.${_version_minor}")
 
-    if(NOT ANDROID AND NOT IOS)
+    if(NOT IOS)
       ocv_check_environment_variables(${library_env} ${include_dir_env})
       if(NOT ${${library_env}} EQUAL "")
           set(PYTHON_LIBRARY "${${library_env}}")
@@ -124,7 +124,7 @@ function(find_python preferred_version min_version library_env include_dir_env
       endif()
     endif()
 
-    if(NOT ANDROID AND NOT IOS)
+    if(NOT IOS)
       if(CMAKE_HOST_UNIX)
         execute_process(COMMAND ${_executable} -c "from distutils.sysconfig import *; print(get_python_lib())"
                         RESULT_VARIABLE _cvpy_process
@@ -193,7 +193,7 @@ function(find_python preferred_version min_version library_env include_dir_env
                           OUTPUT_STRIP_TRAILING_WHITESPACE)
         endif()
       endif()
-    endif(NOT ANDROID AND NOT IOS)
+    endif(NOT IOS)
   endif()
 
   # Export return values
