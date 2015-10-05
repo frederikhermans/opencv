@@ -54,6 +54,16 @@
 static IppStatus sts = ippInit();
 #endif
 
+#include <sys/time.h>
+
+long getCurrentTimeMillis() {
+	struct timeval tp;
+	gettimeofday(&tp, NULL);
+	long int ms = tp.tv_sec * 1000 + tp.tv_usec / 1000; //get current timestamp in milliseconds
+	return ms;
+}
+
+
 namespace cv
 {
 #if IPP_VERSION_X100 >= 701
@@ -5700,12 +5710,18 @@ public:
     virtual void operator() (const Range& range) const
     {
         const int BLOCK_SZ = 32;
+	// Why BLOCK_SZ*BLOCK_SZ _times_ 2?
         short XY[BLOCK_SZ*BLOCK_SZ*2], A[BLOCK_SZ*BLOCK_SZ];
         int x, y, x1, y1, width = dst.cols, height = dst.rows;
 
+	// Width and height of blocks ...
         int bh0 = std::min(BLOCK_SZ/2, height);
         int bw0 = std::min(BLOCK_SZ*BLOCK_SZ/bh0, width);
         bh0 = std::min(BLOCK_SZ*BLOCK_SZ/bw0, height);
+	printf("width=%d, height=%d, bw0=%d, bh0=%d\n",
+               width, height, bw0, bh0);
+	printf("range.start=%d, range.end=%d\n",
+	       range.start, range.end);
 
         #if CV_SSE4_1
         bool haveSSE4_1 = checkHardwareSupport(CV_CPU_SSE4_1);
@@ -5727,16 +5743,19 @@ public:
             {
                 int bw = std::min( bw0, width - x);
                 int bh = std::min( bh0, range.end - y); // height
+//		printf("bw=%d, bh=%d\n", bw, bh);
+		long start, stop;
 
                 Mat _XY(bh, bw, CV_16SC2, XY), matA;
                 Mat dpart(dst, Rect(x, y, bw, bh));
 
+		start = getCurrentTimeMillis();
                 for( y1 = 0; y1 < bh; y1++ )
                 {
                     short* xy = XY + y1*bw*2;
-                    double X0 = M[0]*x + M[1]*(y + y1) + M[2];
-                    double Y0 = M[3]*x + M[4]*(y + y1) + M[5];
-                    double W0 = M[6]*x + M[7]*(y + y1) + M[8];
+                    float X0 = (float) (M[0]*x + M[1]*(y + y1) + M[2]);
+                    float Y0 = (float) (M[3]*x + M[4]*(y + y1) + M[5]);
+                    float W0 = (float) (M[6]*x + M[7]*(y + y1) + M[8]);
 
                     if( interpolation == INTER_NEAREST )
                     {
@@ -5854,10 +5873,12 @@ public:
 
                         for( ; x1 < bw; x1++ )
                         {
-                            double W = W0 + M[6]*x1;
+                            float W = (float) (W0 + M[6]*x1);
+//			    printf("W=%f\n", W);
                             W = W ? 1./W : 0;
-                            double fX = std::max((double)INT_MIN, std::min((double)INT_MAX, (X0 + M[0]*x1)*W));
-                            double fY = std::max((double)INT_MIN, std::min((double)INT_MAX, (Y0 + M[3]*x1)*W));
+                            float fX = std::max((float)INT_MIN, std::min((float)INT_MAX, (X0 + (float) M[0]*x1)*W));
+                            float fY = std::max((float)INT_MIN, std::min((float)INT_MAX, (Y0 + (float) M[3]*x1)*W));
+//			    printf("fX=%f, fY=%f\n", fX, fY);
                             int X = saturate_cast<int>(fX);
                             int Y = saturate_cast<int>(fY);
 
@@ -6009,7 +6030,10 @@ public:
                         }
                     }
                 }
+		stop = getCurrentTimeMillis();
+		printf("Inner loops took %ld ms\n", stop-start);
 
+		start = getCurrentTimeMillis();
                 if( interpolation == INTER_NEAREST )
                     remap( src, dpart, _XY, Mat(), interpolation, borderType, borderValue );
                 else
@@ -6017,6 +6041,8 @@ public:
                     Mat _matA(bh, bw, CV_16U, A);
                     remap( src, dpart, _XY, _matA, interpolation, borderType, borderValue );
                 }
+		stop = getCurrentTimeMillis();
+		printf("remap(...) took %ld ms\n", stop-start);
             }
         }
     }
@@ -6179,7 +6205,13 @@ void cv::warpPerspective( InputArray _src, OutputArray _dst, InputArray _M0,
 
     Range range(0, dst.rows);
     WarpPerspectiveInvoker invoker(src, dst, M, interpolation, borderType, borderValue);
+    long start, stop;
+    start = getCurrentTimeMillis();
+    printf("Invoking warpPerspective ...\n");
     parallel_for_(range, invoker, dst.total()/(double)(1<<16));
+    stop = getCurrentTimeMillis();
+    printf("parallel_for_(range, invoker, ...) took %ld ms\n",
+           stop-start);
 }
 
 
